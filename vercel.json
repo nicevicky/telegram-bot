@@ -1,0 +1,22 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/webhook.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/webhook.js"
+    }
+  ],
+  "env": {
+    "BOT_TOKEN": "@bot_token",
+    "SUPABASE_URL": "@supabase_url",
+    "SUPABASE_KEY": "@supabase_key",
+    "ADMIN_ID": "@admin_id",
+    "GROUP_ID": "@group_id"
+  }
+}
