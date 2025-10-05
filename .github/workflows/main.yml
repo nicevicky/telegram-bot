@@ -1,0 +1,332 @@
+name: Telegram Bot CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '18.x'
+
+jobs:
+  # Lint and Code Quality Check
+  lint:
+    name: Code Quality & Linting
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run ESLint
+      run: npm run lint
+      continue-on-error: true
+      
+    - name: Run Prettier check
+      run: npm run format:check
+      continue-on-error: true
+
+  # Security Audit
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run security audit
+      run: npm audit --audit-level=moderate
+      
+    - name: Run Snyk security scan
+      uses: snyk/actions/node@master
+      env:
+        SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=high
+      continue-on-error: true
+
+  # Unit Tests
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [16.x, 18.x, 20.x]
+        
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js ${{ matrix.node-version }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ matrix.node-version }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run unit tests
+      run: npm test
+      env:
+        NODE_ENV: test
+        
+    - name: Generate test coverage
+      run: npm run test:coverage
+      
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage/lcov.info
+        flags: unittests
+        name: codecov-umbrella
+
+  # Integration Tests with Test Database
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: telegram_bot_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+          
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Setup test database
+      run: |
+        npm run db:migrate:test
+        npm run db:seed:test
+      env:
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/telegram_bot_test
+        
+    - name: Run integration tests
+      run: npm run test:integration
+      env:
+        NODE_ENV: test
+        DATABASE_URL: postgresql://postgres:postgres@localhost:5432/telegram_bot_test
+        BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
+        SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.TEST_SUPABASE_KEY }}
+        ADMIN_ID: ${{ secrets.TEST_ADMIN_ID }}
+
+  # Bot Functionality Tests
+  bot-test:
+    name: Bot Functionality Tests
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Test bot connection
+      run: npm run test:bot-connection
+      env:
+        BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
+        
+    - name: Test webhook setup
+      run: npm run test:webhook
+      env:
+        BOT_TOKEN: ${{ secrets.TEST_BOT_TOKEN }}
+        WEBHOOK_URL: ${{ secrets.TEST_WEBHOOK_URL }}
+        
+    - name: Test database connection
+      run: npm run test:database
+      env:
+        SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+        SUPABASE_KEY: ${{ secrets.TEST_SUPABASE_KEY }}
+
+  # Load Testing
+  load-test:
+    name: Load Testing
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Install Artillery
+      run: npm install -g artillery@latest
+      
+    - name: Run load tests
+      run: artillery run tests/load/bot-load-test.yml
+      continue-on-error: true
+
+  # Build and Deploy to Staging
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [lint, security, test, integration-test]
+    if: github.ref == 'refs/heads/develop'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Build application
+      run: npm run build
+      
+    - name: Deploy to Vercel (Staging)
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        working-directory: ./
+        scope: ${{ secrets.VERCEL_ORG_ID }}
+        
+    - name: Run staging tests
+      run: npm run test:staging
+      env:
+        STAGING_URL: ${{ steps.deploy.outputs.preview-url }}
+
+  # Deploy to Production
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [lint, security, test, integration-test, bot-test]
+    if: github.ref == 'refs/heads/main'
+    
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.preview-url }}
+      
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ env.NODE_VERSION }}
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Build application
+      run: npm run build
+      
+    - name: Deploy to Vercel (Production)
+      id: deploy
+      uses: amondnet/vercel-action@v25
+      with:
+        vercel-token: ${{ secrets.VERCEL_TOKEN }}
+        vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+        vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+        vercel-args: '--prod'
+        working-directory: ./
+        scope: ${{ secrets.VERCEL_ORG_ID }}
+        
+    - name: Set webhook URL
+      run: |
+        curl -X POST "https://api.telegram.org/bot${{ secrets.BOT_TOKEN }}/setWebhook" \
+        -H "Content-Type: application/json" \
+        -d '{"url": "${{ steps.deploy.outputs.preview-url }}/api/webhook"}'
+        
+    - name: Run production smoke tests
+      run: npm run test:production
+      env:
+        PRODUCTION_URL: ${{ steps.deploy.outputs.preview-url }}
+        BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+
+  # Notification
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-production]
+    if: always()
+    
+    steps:
+    - name: Notify Telegram on Success
+      if: needs.deploy-production.result == 'success'
+      run: |
+        curl -X POST "https://api.telegram.org/bot${{ secrets.NOTIFICATION_BOT_TOKEN }}/sendMessage" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "chat_id": "${{ secrets.ADMIN_ID }}",
+          "text": "✅ Bot deployed successfully to production!\n\nCommit: ${{ github.sha }}\nBranch: ${{ github.ref_name }}\nAuthor: ${{ github.actor }}",
+          "parse_mode": "Markdown"
+        }'
+        
+    - name: Notify Telegram on Failure
+      if: needs.deploy-production.result == 'failure'
+      run: |
+        curl -X POST "https://api.telegram.org/bot${{ secrets.NOTIFICATION_BOT_TOKEN }}/sendMessage" \
+        -H "Content-Type: application/json" \
+        -d '{
+          "chat_id": "${{ secrets.ADMIN_ID }}",
+          "text": "❌ Bot deployment failed!\n\nCommit: ${{ github.sha }}\nBranch: ${{ github.ref_name }}\nAuthor: ${{ github.actor }}\n\nCheck the logs for details.",
+          "parse_mode": "Markdown"
+        }'
