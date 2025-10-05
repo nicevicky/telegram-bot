@@ -14,9 +14,9 @@
   ],
   "env": {
     "BOT_TOKEN": "8296078513:AAH_cJ2qFkt76mkBbLBE04G-MWyH4Zj3GCA",
-    "SUPABASE_URL": "@supabase_url",
-    "SUPABASE_KEY": "@supabase_key",
-    "ADMIN_ID": "@admin_id",
-    "GROUP_ID": "@group_id"
+    "SUPABASE_URL": "https://rocregxjqifsxlbgssqe.supabase.co",
+    "SUPABASE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJvY3JlZ3hqcWlmc3hsYmdzc3FlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTUzMDgzOTAsImV4cCI6MjA3MDg4NDM5MH0.-QWY_ZSTvDGZoeL8A_Bthytthnm4X7llkOs4kcxA1BM",
+    "ADMIN_ID": "5727413041",
+    "GROUP_ID": "-1003083388928"
   }
 }
